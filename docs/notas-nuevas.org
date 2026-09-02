@@ -1,0 +1,1915 @@
+#+title: Guía de instalación de Arch Linux con Xfce, Btrfs/Snapper y /home XFS
+#+date: 2026-09-01
+#+filetags: :arch:linux:xfce:instalacion:sistema:
+#+description: Instalación reproducible de una workstation Arch Linux con systemd-boot, Btrfs/Snapper, /home XFS, ZRAM, swap física para hibernación, Xfce/LightDM y cifrado selectivo.
+#+options: toc:3 num:t
+#+startup: overview
+
+* 0. Motivación, objetivos y decisiones de diseño
+** 0.1 Por qué volver a Arch Linux
+Esta instalación no parte de la idea de que Arch sea «mejor» que Debian de forma general. La razón es más concreta: la distribución debe adaptarse al flujo de trabajo y reducir el coste de mantener sus herramientas fundamentales.
+
+En esta estación de trabajo, =Emacs= y =Hugo= son piezas centrales. Debian Stable ofrece una base especialmente previsible, pero cuando se necesita seguir de cerca versiones recientes de aplicaciones que evolucionan con rapidez, mantenerlas al día puede obligar a introducir compilaciones propias, paquetes externos, repositorios adicionales o mecanismos paralelos al gestor de paquetes de la distribución.
+
+El objetivo de volver a Arch es eliminar esa fricción. Arch permite mantener el sistema y las herramientas principales mediante un único mecanismo coherente, =pacman=, con versiones recientes de Emacs, Hugo y buena parte del resto del entorno de trabajo.
+
+La decisión, por tanto, no es «usar software nuevo por usar software nuevo». Es:
+
+→ mantener actuales las herramientas que condicionan el flujo de escritura y publicación;
+→ evitar instalaciones paralelas de Emacs o Hugo;
+→ reducir excepciones administrativas;
+→ mantener una estación de trabajo sencilla de comprender, documentar y reconstruir;
+→ aprovechar el modelo rolling release sin convertir el sistema en un entorno experimental.
+
+** 0.2 Objetivo general
+Construir una workstation Arch Linux moderna, eficiente, resiliente y reproducible, con un escritorio Xfce ligero y muy orientado al teclado, manteniendo una separación clara entre:
+
+→ sistema operativo;
+→ datos personales;
+→ snapshots del sistema;
+→ copias de seguridad;
+→ cachés y datos que no deben retroceder con un rollback;
+→ información que realmente necesita cifrado.
+
+La instalación debe ser suficientemente sencilla para que una avería pueda diagnosticarse desde una TTY o desde la ISO de Arch sin depender de capas innecesarias.
+
+** 0.3 Objetivos específicos
+→ Arrancar mediante UEFI y =systemd-boot=, sin GRUB y sin dual boot.
+→ Mantener dos kernels: =linux= como principal y =linux-lts= como alternativa de recuperación.
+→ Usar Btrfs en la raíz para snapshots con Snapper.
+→ Mantener =/home= en una partición XFS independiente, fuera de cualquier rollback del sistema.
+→ Separar =/var/log= y =/var/cache/pacman/pkg= en subvolúmenes Btrfs independientes.
+→ Usar ZRAM para el intercambio normal y una swap física al final del disco para hibernación.
+→ Instalar primero un Arch mínimo y comprobarlo antes de añadir la capa gráfica.
+→ Instalar Xorg, Xfce y LightDM posteriormente desde la consola mínima.
+→ Utilizar PipeWire y NetworkManager, dejando que =archinstall= configure ambos cuando corresponda.
+→ Mantener GNOME Keyring como almacén de secretos sin instalar GNOME como escritorio.
+→ Configurar Xfce para un uso prioritario con teclado.
+→ Utilizar un tema mantenido en repositorios oficiales como base visual; actualmente =orchis-theme= es la opción preferida.
+→ Mantener inicialmente el compositor de Xfwm; Picom sólo se añadirá si aporta una mejora concreta.
+→ Introducir AUR únicamente después de disponer de una base estable y comprobada.
+→ Cifrar de forma selectiva sólo los datos que lo requieran, sin introducir una contraseña LUKS en el arranque.
+
+** 0.4 Principios de resiliencia
+La resiliencia no procede de instalar muchas herramientas de recuperación. Procede de reducir el número de estados ambiguos y de comprobar cada capa antes de continuar.
+
+→ No instalar el escritorio hasta haber arrancado el Arch mínimo desde el NVMe.
+→ No personalizar Xfce hasta comprobar primero el escritorio base.
+→ No activar Syncthing hasta haber restaurado y verificado las rutas definitivas.
+→ No considerar los snapshots un sustituto de las copias de seguridad.
+→ No realizar actualizaciones parciales: la operación normal es =pacman -Syu=.
+→ Conservar =linux-lts= como segundo kernel.
+→ Mantener el AUR reducido a paquetes cuya utilidad justifique salir de los repositorios oficiales.
+→ Leer las noticias de Arch cuando una actualización requiera intervención manual.
+→ Evitar «optimizaciones» de rendimiento sin una necesidad medible.
+→ Mantener documentadas las decisiones que alteren el arranque, el almacenamiento o la recuperación.
+
+** 0.5 Decisiones de almacenamiento
+El NVMe de 2 TB se dedica íntegramente a Arch Linux. El esquema objetivo es:
+
+| Partición | Tamaño aproximado | Tipo / sistema de archivos | Función |
+|-----------+-------------------+-----------------------------+---------|
+| =p1= | 2 GiB | EFI / FAT32 | =/boot= y systemd-boot |
+| =p2= | 512 GiB | Btrfs | raíz del sistema |
+| =p3= | ~1,28 TiB | XFS | =/home= |
+| =p4= | ~40 GiB | Linux swap | hibernación y swap secundaria |
+
+La partición Btrfs contendrá:
+
+#+begin_src text
+ARCH_ROOT
+├── @           -> /
+├── @snapshots  -> /.snapshots
+├── @log        -> /var/log
+└── @pkg        -> /var/cache/pacman/pkg
+#+end_src
+
+=/var/lib/pacman= permanece dentro de =@=. Por ello, una recuperación del sistema mediante un snapshot conserva también el estado de la base de datos de paquetes correspondiente.
+
+=/home= no es un subvolumen Btrfs. Es XFS y no retrocede cuando se restaura la raíz.
+
+** 0.6 ZRAM, swap física e hibernación
+Se mantienen dos espacios de intercambio con funciones distintas:
+
+#+begin_src text
+RAM
+ │
+ ├── intercambio ordinario
+ │      └── ZRAM -> prioridad 100
+ │
+ └── hibernación
+        └── /dev/nvme0n1p4 -> ~40 GiB -> prioridad 10
+#+end_src
+
+=archinstall= puede instalar y configurar =zram-generator= cuando se activa la opción de swap/ZRAM. El valor predeterminado de =zram-generator= para el tamaño, si no se especifica otro, es =min(ram / 2, 4096)=; con 32 GiB de RAM eso deja 4 GiB. Tras el primer arranque se ajustará a un máximo de 16 GiB:
+
+#+begin_src conf
+[zram0]
+zram-size = min(ram / 2, 16384)
+compression-algorithm = zstd
+swap-priority = 100
+#+end_src
+
+La swap física quedará con prioridad 10. systemd ignora ZRAM como destino de hibernación y utiliza un espacio swap persistente adecuado.
+
+** 0.7 Cifrado: decisión consciente
+No se cifra ni la raíz ni =/home=. Se evita así introducir una etapa de desbloqueo LUKS en el arranque y se mantiene un procedimiento de recuperación muy directo desde la ISO.
+
+Los datos que realmente necesiten protección se cifrarán selectivamente con =gocryptfs= u otra herramienta equivalente a nivel de usuario.
+
+Advertencia: la swap utilizada para hibernación tampoco está cifrada. Un fichero cifrado que se encuentre abierto puede existir descifrado en RAM y parte de esa RAM puede terminar en la imagen de hibernación. El cifrado selectivo protege los datos en reposo, pero no proporciona el mismo modelo de amenaza que el cifrado completo del disco.
+
+** 0.8 Qué hará archinstall y qué haremos manualmente
+Se utilizará =archinstall= para automatizar tareas repetitivas, no para particionar el disco ni ocultar la arquitectura del sistema.
+
+Antes de ejecutar =archinstall= deben estar terminados:
+
+→ la tabla GPT;
+→ las cuatro particiones;
+→ sus sistemas de archivos;
+→ los subvolúmenes Btrfs;
+→ todos los montajes bajo =/mnt=;
+→ la activación de la swap física;
+→ la comprobación de la estructura con =lsblk= y =findmnt=.
+
+Hay dos rutas posibles para preparar el disco:
+
+→ *Ruta A - GParted Live*: crear y formatear visualmente las cuatro particiones antes de arrancar la ISO de Arch;
+→ *Ruta B - ISO de Arch*: crear la GPT y las cuatro particiones con =cfdisk= y formatearlas desde la consola de la ISO.
+
+Ambas rutas convergen antes de =archinstall=: desde la ISO de Arch se crean los subvolúmenes Btrfs, se monta toda la estructura bajo =/mnt= y se comprueba.
+
+=archinstall= se ocupará después de:
+
+→ utilizar la configuración de disco ya montada mediante =Pre-mounted configuration= sobre =/mnt=, sin modificar la tabla de particiones;
+→ instalación del sistema mínimo;
+→ instalación de =linux= y =linux-lts=;
+→ detección e instalación del microcódigo AMD necesario;
+→ systemd-boot;
+→ NetworkManager;
+→ PipeWire/WirePlumber cuando se seleccione PipeWire;
+→ ZRAM mediante =zram-generator= cuando se active la opción correspondiente;
+→ usuario, locale, zona horaria y configuración básica;
+→ instalación de un conjunto pequeño de herramientas de consola.
+
+Haremos manualmente después:
+
+→ verificación de =fstab= y de todos los montajes;
+→ ajuste del tamaño de ZRAM y de la prioridad de la swap física;
+→ verificación/configuración de la hibernación;
+→ Snapper y =snap-pac=;
+→ Xorg, Xfce y LightDM;
+→ apariencia y atajos;
+→ AUR y =paru=;
+→ aplicaciones de usuario;
+→ restauración de configuración y datos;
+→ cifrado selectivo.
+
+** 0.9 Guion completo de la instalación
+Este mapa debe leerse antes de empezar. La guía detallada sigue exactamente este orden.
+
+#+begin_src text
+INSTALACIÓN ARCH / XFCE
+│
+├── OPCIONAL ANTES DE LA ISO ARCH
+│   └── Ruta A - GParted Live
+│       ├── crear GPT
+│       ├── p1   2 GiB       FAT32 + ESP
+│       ├── p2 512 GiB       Btrfs
+│       ├── p3 ~1,28 TiB     XFS
+│       ├── p4 ~40 GiB       Linux swap
+│       └── comprobar y apagar la live
+│
+├── FASE 1 - ISO ARCH Y RED
+│   ├── comprobar UEFI
+│   ├── teclado español
+│   ├── identificar NVMe
+│   ├── conectar Wi-Fi con iwctl
+│   └── comprobar Internet y reloj
+│
+├── FASE 2 - ALMACENAMIENTO ANTES DE ARCHINSTALL
+│   │
+│   ├── si NO se usó GParted
+│   │   └── Ruta B - cfdisk desde la ISO
+│   │       ├── crear GPT
+│   │       ├── p1   2 GiB       EFI
+│   │       ├── p2 512 GiB       Linux filesystem
+│   │       ├── p3 ~1,28 TiB     Linux filesystem
+│   │       ├── p4 ~40 GiB       Linux swap
+│   │       └── formatear FAT32 / Btrfs / XFS / swap
+│   │
+│   ├── punto común de ambas rutas
+│   ├── verificar p1-p4
+│   ├── crear en p2
+│   │   ├── @
+│   │   ├── @snapshots
+│   │   ├── @log
+│   │   └── @pkg
+│   ├── montar
+│   │   ├── @           -> /mnt
+│   │   ├── @snapshots  -> /mnt/.snapshots
+│   │   ├── @log        -> /mnt/var/log
+│   │   ├── @pkg        -> /mnt/var/cache/pacman/pkg
+│   │   ├── p3          -> /mnt/home
+│   │   ├── p1          -> /mnt/boot
+│   │   └── p4          -> swap activa
+│   └── comprobar lsblk + findmnt + swapon
+│
+├── FASE 3 - ARCHINSTALL MINIMAL
+│   ├── Disk configuration -> Pre-mounted configuration (/mnt)
+│   ├── Profile -> Minimal
+│   ├── Bootloader -> systemd-boot
+│   ├── Kernels -> linux + linux-lts
+│   ├── Network -> NetworkManager
+│   ├── Audio -> PipeWire
+│   ├── Swap/ZRAM -> activada
+│   ├── usuario con sudo
+│   ├── es_ES.UTF-8 / teclado es
+│   ├── Europe/Madrid
+│   └── paquetes útiles de consola
+│
+├── REINICIAR SIN USB
+│
+├── FASE 4 - ARCH MÍNIMO / TTY
+│   ├── comprobar arranque
+│   ├── probar linux y linux-lts
+│   ├── Wi-Fi con NetworkManager
+│   ├── comprobar Btrfs, XFS y fstab
+│   ├── ajustar ZRAM
+│   ├── swap física con prioridad 10
+│   ├── verificar/configurar hibernación
+│   ├── probar hibernación
+│   ├── activar/verificar fstrim
+│   ├── Snapper + snap-pac
+│   └── snapshot "Arch mínimo verificado"
+│
+├── FASE 5 - EN CONSOLA MÍNIMA
+│   ├── Mesa / Vulkan AMD
+│   ├── Xorg
+│   ├── Xfce
+│   ├── LightDM
+│   ├── GNOME Keyring
+│   ├── integración Thunar
+│   ├── NetworkManager Applet
+│   ├── pavucontrol
+│   ├── comprobar antes de activar login gráfico
+│   ├── habilitar LightDM
+│   └── reiniciar
+│
+├── FASE 6 - PRIMER ARRANQUE XFCE
+│   ├── resolución / GPU
+│   ├── Wi-Fi
+│   ├── PipeWire
+│   ├── Thunar / USB
+│   ├── GNOME Keyring
+│   ├── bloqueo
+│   ├── suspensión
+│   ├── hibernación
+│   └── snapshot "Xfce base funcional"
+│
+├── FASE 7 - CONFIGURAR XFCE
+│   ├── Orchis
+│   ├── Papirus
+│   ├── fuentes
+│   ├── panel y escritorio
+│   ├── atajos de teclado
+│   ├── Rofi
+│   ├── compositor Xfwm inicialmente
+│   └── Picom sólo si aporta una mejora concreta
+│
+├── FASE 8 - AUR
+│   ├── revisar política AUR
+│   ├── instalar paru
+│   └── Aporetic y otros paquetes realmente justificados
+│
+├── FASE 9 - APLICACIONES
+│   ├── Emacs
+│   ├── Hugo
+│   ├── navegador
+│   ├── terminal
+│   ├── backup
+│   ├── sincronización
+│   ├── seguridad
+│   └── resto
+│
+├── FASE 10 - RESTAURACIÓN
+│   ├── estructura de /home
+│   ├── dotfiles
+│   ├── Emacs
+│   ├── notas
+│   ├── Blog
+│   └── datos
+│
+├── FASE 11 - VALIDACIÓN FINAL
+│   ├── servicios
+│   ├── kernels
+│   ├── snapshots
+│   ├── hibernación
+│   ├── backup
+│   └── snapshot final
+│
+└── FASE 12 - MANTENIMIENTO Y RECUPERACIÓN
+#+end_src
+
+* 1. Fase 1 - ISO, UEFI y conexión Wi-Fi
+** 1.1 Objetivo
+Arrancar la ISO oficial en modo UEFI, disponer de teclado español, identificar sin ambigüedad el NVMe que se va a borrar y tener conectividad antes de ejecutar =archinstall=.
+
+** 1.2 Razones
+El error más grave de esta instalación no sería un paquete incorrecto: sería actuar sobre el disco equivocado. La red también debe funcionar antes de ejecutar el instalador, porque Arch descarga los paquetes desde los repositorios durante la instalación.
+
+** 1.3 Comprobar UEFI
+#+begin_src sh
+ls /sys/firmware/efi/efivars
+#+end_src
+
+Si el directorio existe y contiene variables, la ISO está arrancada en UEFI. Si no existe, reiniciar y seleccionar explícitamente la entrada UEFI del USB.
+
+** 1.4 Cargar teclado español
+#+begin_src sh
+loadkeys es
+#+end_src
+
+** 1.5 Identificar el NVMe
+#+begin_src sh
+lsblk -o NAME,SIZE,TYPE,FSTYPE,LABEL,MOUNTPOINTS,MODEL
+fdisk -l /dev/nvme0n1
+#+end_src
+
+La guía presupone que el disco de 2 TB es =/dev/nvme0n1=. No copiar los comandos destructivos si el nombre real es diferente.
+
+** 1.6 Comprobar bloqueo de radio
+#+begin_src sh
+rfkill list
+#+end_src
+
+Si Wi-Fi aparece bloqueado:
+
+#+begin_src sh
+rfkill unblock wifi
+#+end_src
+
+** 1.7 Conectar con iwctl
+#+begin_src sh
+iwctl
+#+end_src
+
+Dentro de =iwctl=:
+
+#+begin_src text
+device list
+station wlan0 scan
+station wlan0 get-networks
+station wlan0 connect "NOMBRE_WIFI"
+exit
+#+end_src
+
+Sustituir =wlan0= por el dispositivo que muestre =device list=.
+
+** 1.8 Comprobar red y reloj
+#+begin_src sh
+ping -c 3 archlinux.org
+timedatectl status
+#+end_src
+
+** 1.9 Comprobación de salida
+- [ ] La ISO está en UEFI.
+- [ ] El teclado español funciona.
+- [ ] =/dev/nvme0n1= se ha identificado por modelo y tamaño.
+- [ ] Wi-Fi está conectado.
+- [ ] =ping archlinux.org= funciona.
+- [ ] La fecha y hora son razonables.
+
+No pasar a la fase 2 hasta completar estas comprobaciones.
+
+* 2. Fase 2 - Preparar almacenamiento antes de archinstall
+** 2.1 Objetivo
+Dejar el NVMe completamente particionado, formateado y montado antes de ejecutar =archinstall=. El instalador debe recibir una estructura ya decidida y comprobada; no debe volver a particionar ni formatear el disco.
+
+La fase ofrece dos rutas alternativas:
+
+→ *Ruta A*: las cuatro particiones ya se crearon y formatearon previamente con GParted Live;
+→ *Ruta B*: todavía no se ha particionado y se hace desde la ISO de Arch mediante =cfdisk=.
+
+Las dos rutas convergen en el apartado 2.5. A partir de ese momento los pasos son idénticos.
+
+** 2.2 Esquema objetivo
+El resultado físico del disco debe ser:
+
+| Partición | Tamaño aproximado | Sistema / tipo | Uso |
+|-----------+-------------------+----------------+-----|
+| =/dev/nvme0n1p1= | 2 GiB | FAT32 / ESP | =/boot= |
+| =/dev/nvme0n1p2= | 512 GiB | Btrfs | sistema |
+| =/dev/nvme0n1p3= | ~1,28 TiB | XFS | =/home= |
+| =/dev/nvme0n1p4= | ~40 GiB | Linux swap | hibernación + swap secundaria |
+
+=p4= debe ser la última partición física y numérica.
+
+** 2.3 Ruta A - Disco preparado previamente con GParted Live
+Esta es la ruta preferida cuando se desea hacer la operación destructiva de forma visual antes de arrancar la ISO de Arch.
+
+*** 2.3.1 En GParted Live
+Seleccionar inequívocamente el NVMe de 2 TB.
+
+Crear una tabla de particiones:
+
+→ =Device -> Create Partition Table -> GPT=.
+
+Crear y formatear:
+
+→ =p1=: 2 GiB, FAT32, bandera =esp=;
+→ =p2=: 512 GiB, Btrfs;
+→ =p3=: utilizar el espacio principal dejando aproximadamente 40 GiB al final, XFS;
+→ =p4=: todo el espacio restante, aproximadamente 40 GiB, =linux-swap=.
+
+No crear subvolúmenes Btrfs en GParted. Sólo se crean las cuatro particiones y sus sistemas de archivos.
+
+Antes de aplicar los cambios, comprobar visualmente:
+
+#+begin_src text
+| EFI 2G | Btrfs 512G |        XFS ~1,28T        | swap ~40G |
+#+end_src
+
+Aplicar los cambios, comprobar que no hay errores y apagar la live.
+
+*** 2.3.2 Tras arrancar la ISO de Arch
+Después de completar la Fase 1, comprobar que los sistemas de archivos creados con GParted aparecen correctamente:
+
+#+begin_src sh
+lsblk -o NAME,SIZE,FSTYPE,PARTTYPENAME,LABEL,MOUNTPOINTS /dev/nvme0n1
+fdisk -l /dev/nvme0n1
+#+end_src
+
+Resultado esperado:
+
+#+begin_src text
+nvme0n1
+├─nvme0n1p1   2G      vfat
+├─nvme0n1p2   512G    btrfs
+├─nvme0n1p3   ~1.28T  xfs
+└─nvme0n1p4   ~40G    swap
+#+end_src
+
+Si coincide, no volver a ejecutar =mkfs=. Pasar directamente al apartado 2.5.
+
+** 2.4 Ruta B - Particionar desde la ISO de Arch
+Utilizar esta ruta sólo si el disco no se preparó previamente con GParted.
+
+*** 2.4.1 Crear la GPT y las cuatro particiones
+Ejecutar:
+
+#+begin_src sh
+cfdisk /dev/nvme0n1
+#+end_src
+
+Seleccionar =gpt= si se solicita el tipo de tabla.
+
+Eliminar las particiones existentes y crear en este orden:
+
+→ =p1=: 2 GiB, tipo =EFI System=;
+→ =p2=: 512 GiB, tipo =Linux filesystem=;
+→ =p3=: aproximadamente 1309 GiB, tipo =Linux filesystem=, dejando unos 40 GiB libres al final;
+→ =p4=: utilizar todo el espacio restante, tipo =Linux swap=.
+
+Elegir =Write=, escribir =yes= y salir con =Quit=.
+
+Comprobar antes de formatear:
+
+#+begin_src sh
+udevadm settle
+lsblk -o NAME,SIZE,TYPE,PARTTYPENAME /dev/nvme0n1
+fdisk -l /dev/nvme0n1
+#+end_src
+
+*** 2.4.2 Formatear
+Sólo en la Ruta B:
+
+#+begin_src sh
+mkfs.fat -F 32 -n ARCH_EFI /dev/nvme0n1p1
+mkfs.btrfs -f -L ARCH_ROOT /dev/nvme0n1p2
+mkfs.xfs -f -L ARCH_HOME /dev/nvme0n1p3
+mkswap -L ARCH_SWAP /dev/nvme0n1p4
+#+end_src
+
+Comprobar:
+
+#+begin_src sh
+lsblk -f /dev/nvme0n1
+#+end_src
+
+** 2.5 Punto común - Crear los subvolúmenes Btrfs
+A partir de aquí las dos rutas son idénticas.
+
+Montar temporalmente el nivel superior de Btrfs:
+
+#+begin_src sh
+mount /dev/nvme0n1p2 /mnt
+#+end_src
+
+Crear exactamente:
+
+#+begin_src sh
+btrfs subvolume create /mnt/@
+btrfs subvolume create /mnt/@snapshots
+btrfs subvolume create /mnt/@log
+btrfs subvolume create /mnt/@pkg
+#+end_src
+
+Comprobar:
+
+#+begin_src sh
+btrfs subvolume list /mnt
+#+end_src
+
+Deben aparecer =@=, =@snapshots=, =@log= y =@pkg=. No debe existir =@home=.
+
+Desmontar:
+
+#+begin_src sh
+umount /mnt
+#+end_src
+
+** 2.6 Montar la estructura definitiva bajo /mnt
+Montar la raíz:
+
+#+begin_src sh
+mount -o noatime,compress=zstd:3,subvol=@ \
+  /dev/nvme0n1p2 /mnt
+#+end_src
+
+Crear los puntos de montaje:
+
+#+begin_src sh
+mkdir -p /mnt/boot
+mkdir -p /mnt/home
+mkdir -p /mnt/.snapshots
+mkdir -p /mnt/var/log
+mkdir -p /mnt/var/cache/pacman/pkg
+#+end_src
+
+Montar los subvolúmenes:
+
+#+begin_src sh
+mount -o noatime,compress=zstd:3,subvol=@snapshots \
+  /dev/nvme0n1p2 /mnt/.snapshots
+
+mount -o noatime,compress=zstd:3,subvol=@log \
+  /dev/nvme0n1p2 /mnt/var/log
+
+mount -o noatime,compress=zstd:3,subvol=@pkg \
+  /dev/nvme0n1p2 /mnt/var/cache/pacman/pkg
+#+end_src
+
+Montar =/home= y la ESP:
+
+#+begin_src sh
+mount -o noatime /dev/nvme0n1p3 /mnt/home
+mount /dev/nvme0n1p1 /mnt/boot
+#+end_src
+
+Activar la swap física:
+
+#+begin_src sh
+swapon /dev/nvme0n1p4
+#+end_src
+
+** 2.7 Comprobación obligatoria antes de archinstall
+Ejecutar:
+
+#+begin_src sh
+lsblk -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINTS
+findmnt /mnt
+findmnt /mnt/boot
+findmnt /mnt/home
+findmnt /mnt/.snapshots
+findmnt /mnt/var/log
+findmnt /mnt/var/cache/pacman/pkg
+swapon --show
+btrfs subvolume list /mnt
+#+end_src
+
+Resultado obligatorio:
+
+→ =/mnt= corresponde a Btrfs =@=;
+→ =/mnt/boot= corresponde a =p1= FAT32;
+→ =/mnt/home= corresponde a =p3= XFS;
+→ =@snapshots=, =@log= y =@pkg= están en sus destinos;
+→ =p4= aparece como swap activa;
+→ no existe =@home=;
+→ el instalador aún no se ha ejecutado.
+
+** 2.8 Criterio de salida
+- [ ] Las cuatro particiones existen y tienen el tipo correcto.
+- [ ] Sólo existe una ESP.
+- [ ] La ESP es =p1= y está montada en =/mnt/boot=.
+- [ ] Btrfs es =p2= y contiene los cuatro subvolúmenes previstos.
+- [ ] XFS es =p3= y está montada en =/mnt/home=.
+- [ ] La swap es =p4=, ronda 40 GiB y está al final del disco.
+- [ ] =findmnt= muestra todos los montajes correctos.
+- [ ] =swapon --show= muestra la swap física.
+- [ ] No se ha dejado que =archinstall= modifique el disco.
+
+Sólo cuando todo lo anterior sea correcto se inicia =archinstall=.
+
+* 3. Fase 3 - Archinstall Minimal
+** 3.1 Objetivo
+Dejar que =archinstall= realice las tareas mecánicas de una instalación base, pero detenerse antes de instalar Xorg/Xfce. El primer sistema que arrancará desde el NVMe debe ser una consola mínima.
+
+** 3.2 Configuración de disco: usar los montajes existentes
+En =Disk configuration= seleccionar la modalidad de configuración ya montada, denominada =Pre-mounted configuration= o equivalente según la versión mostrada por la ISO, con punto de montaje:
+
+#+begin_src text
+/mnt
+#+end_src
+
+El resumen/configuración interna de =archinstall= representa esta modalidad como =pre_mounted_config=. En este modo el instalador utiliza los sistemas de archivos que ya están montados y no realiza operaciones de particionado.
+
+No seleccionar:
+
+→ =Best-effort default partition layout=;
+→ =Manual partitioning=.
+
+El disco ya quedó terminado en la Fase 2.
+
+Antes de continuar dentro de =archinstall=, comprobar una vez más desde otra TTY si es necesario:
+
+#+begin_src sh
+findmnt /mnt
+findmnt /mnt/boot
+findmnt /mnt/home
+swapon --show
+#+end_src
+
+** 3.3 Perfil
+Seleccionar:
+
+→ =Profile -> Minimal=.
+
+No seleccionar el perfil Xfce/Desktop. El perfil de escritorio de =archinstall= instala más componentes de los que queremos y elimina el punto de control entre sistema mínimo y escritorio.
+
+** 3.4 Bootloader
+Seleccionar:
+
+→ =Bootloader -> Systemd-boot=.
+
+No hay Windows ni otro sistema operativo en el equipo. systemd-boot es suficiente y mantiene una configuración de arranque pequeña.
+
+** 3.5 Kernels
+Seleccionar:
+
+→ =linux=;
+→ =linux-lts=.
+
+El primero será el kernel ordinario. El segundo se utilizará como ruta de recuperación si una actualización del kernel principal provoca un problema.
+
+** 3.6 Red
+Seleccionar:
+
+→ =Network configuration -> NetworkManager=.
+
+La conexión realizada mediante =iwctl= pertenece a la ISO y no debe suponerse que se trasladará automáticamente. NetworkManager será el gestor de red del sistema instalado.
+
+** 3.7 Audio
+Seleccionar:
+
+→ =Audio -> PipeWire=.
+
+=archinstall= instala actualmente el conjunto PipeWire/WirePlumber correspondiente. No se volverá a instalar el stack de audio manualmente en la fase de Xfce.
+
+** 3.8 Swap/ZRAM
+Activar la opción de swap/ZRAM de =archinstall=.
+
+En la implementación actual, =archinstall= instala =zram-generator= y utiliza ZRAM. También añade =zswap.enabled=0= al arranque cuando utiliza ZRAM. Después del primer arranque sólo revisaremos el resultado y ajustaremos el tamaño a nuestra política de 16 GiB máximos.
+
+La partición física =p4= sigue existiendo como swap persistente para hibernación.
+
+** 3.9 Locale, teclado y zona horaria
+Configurar:
+
+→ idioma/locale: =es_ES.UTF-8=;
+→ codificación: =UTF-8=;
+→ teclado: =es=;
+→ zona horaria: =Europe/Madrid=;
+→ NTP: activado.
+
+Puede mantenerse también =en_US.UTF-8= generado como locale secundario si resulta útil para programas o diagnósticos.
+
+** 3.10 Usuario
+Crear el usuario normal durante =archinstall= y concederle permisos de =sudo=.
+
+No utilizar la cuenta =root= para el trabajo ordinario.
+
+** 3.11 Paquetes adicionales que conviene pedir a archinstall
+El objetivo del campo =Additional packages= no es instalar toda la workstation, sino llegar a la primera TTY con herramientas suficientes para diagnosticar y terminar la instalación sin volver a la ISO.
+
+Conjunto recomendado:
+
+El =archinstall= actual ya incluye =base-devel= en la instalación base. No debe repetirse en =Additional packages=. Conviene, no obstante, comprobar el resumen final que muestra el instalador antes de ejecutar la instalación por si este comportamiento cambia en una versión futura.
+
+#+begin_src text
+bash-completion
+curl
+fd
+fzf
+git
+htop
+iotop-c
+jq
+less
+man-db
+man-pages
+nano
+nvme-cli
+openssh
+pacman-contrib
+pciutils
+ripgrep
+rsync
+smartmontools
+tmux
+tree
+usbutils
+wget
+7zip
+unzip
+#+end_src
+
+*** 3.11.1 Por qué incluirlos ahora
+→ =git=: necesario para clonar el PKGBUILD de =paru=; =base-devel= ya lo instala actualmente =archinstall=.
+→ =rsync=: útil para restauración y comprobación de datos.
+→ =openssh=: permite acceso/transferencia SSH cuando sea necesario.
+→ =nano= y =less=: editor y paginador disponibles antes de restaurar Emacs.
+→ =man-db= y =man-pages=: documentación local durante la configuración.
+→ =pacman-contrib=: aporta herramientas como =paccache=.
+→ =smartmontools= y =nvme-cli=: diagnóstico del almacenamiento.
+→ =pciutils= y =usbutils=: diagnóstico de hardware.
+→ =htop= e =iotop-c=: monitorización básica.
+→ =tmux=: especialmente útil durante instalaciones, restauraciones y pruebas largas.
+→ =ripgrep=, =fd= y =fzf=: búsquedas rápidas en la consola mínima.
+→ =curl= y =wget=: descarga/diagnóstico HTTP.
+→ =jq=: inspección de JSON.
+→ =7zip= y =unzip=: archivos comprimidos comunes.
+→ =tree=: inspección rápida de estructuras de directorios.
+
+*** 3.11.2 Qué puede esperar
+No instalar todavía mediante =archinstall=:
+
+→ Emacs;
+→ Hugo;
+→ Firefox;
+→ Alacritty;
+→ Rofi;
+→ temas o fuentes;
+→ Picom;
+→ Syncthing;
+→ Borg/Pika;
+→ Darktable;
+→ Steam;
+→ =paru=;
+→ aplicaciones AUR.
+
+Nada impide instalar el conjunto de consola después del primer arranque con =pacman=. Pedirlo a =archinstall= sólo ahorra una transacción y deja la TTY preparada para diagnóstico desde el primer minuto.
+
+** 3.12 Mirrors
+Seleccionar una región razonablemente cercana, por ejemplo Spain, y dejar que =archinstall= configure los mirrors. No es necesario instalar =reflector= sólo para reproducir inmediatamente una tarea que el instalador ya ha realizado.
+
+** 3.13 Revisar la configuración antes de instalar
+Antes de seleccionar =Install=, revisar el resumen completo.
+
+- [ ] Los montajes preexistentes de la Fase 2 siguen correctos.
+- [ ] Disk configuration = Pre-mounted configuration (/mnt).
+- [ ] Perfil =Minimal=.
+- [ ] Bootloader =systemd-boot=.
+- [ ] Kernels =linux= y =linux-lts=.
+- [ ] NetworkManager seleccionado.
+- [ ] PipeWire seleccionado.
+- [ ] ZRAM activada.
+- [ ] Usuario normal con sudo.
+- [ ] Locale y zona horaria correctos.
+- [ ] Paquetes adicionales revisados.
+
+Sólo después ejecutar la instalación.
+
+** 3.14 Al terminar archinstall
+No instalar Xfce desde el entorno post-install de =archinstall=. Salir del instalador y reiniciar para comprobar primero el sistema mínimo.
+
+Retirar el USB cuando la máquina se reinicie.
+
+* 4. Fase 4 - Primer arranque: Arch mínimo en TTY
+** 4.1 Objetivo
+Demostrar que el sistema instalado es autónomo antes de añadir la capa gráfica.
+
+El resultado esperado es:
+
+#+begin_src text
+UEFI
+  -> systemd-boot
+      -> Arch Linux
+          -> TTY
+#+end_src
+
+** 4.2 Identificar el kernel
+#+begin_src sh
+uname -r
+cat /etc/os-release
+#+end_src
+
+** 4.3 Comprobar almacenamiento
+#+begin_src sh
+lsblk -f
+findmnt /
+findmnt /boot
+findmnt /home
+findmnt /.snapshots
+findmnt /var/log
+findmnt /var/cache/pacman/pkg
+sudo btrfs subvolume list /
+cat /etc/fstab
+#+end_src
+
+Resultado obligatorio:
+
+→ =/= es Btrfs y utiliza =@=;
+→ =/home= es XFS;
+→ =/boot= es FAT32;
+→ =@snapshots=, =@log= y =@pkg= están montados en los destinos previstos;
+→ la swap física aparece en =fstab=.
+
+** 4.4 Conectar Wi-Fi con NetworkManager
+Comprobar dispositivos:
+
+#+begin_src sh
+nmcli device
+nmcli device wifi list
+#+end_src
+
+Método recomendado para no escribir la contraseña en el historial:
+
+#+begin_src sh
+nmtui
+#+end_src
+
+Alternativa:
+
+#+begin_src sh
+nmcli --ask device wifi connect "NOMBRE_WIFI"
+#+end_src
+
+Comprobar:
+
+#+begin_src sh
+nmcli connection show
+ping -c 3 archlinux.org
+#+end_src
+
+** 4.5 Actualizar antes de continuar
+#+begin_src sh
+sudo pacman -Syu
+#+end_src
+
+No utilizar =pacman -Sy paquete= como forma normal de instalar: Arch no soporta actualizaciones parciales.
+
+** 4.6 Probar linux-lts
+Reiniciar y seleccionar la entrada de =linux-lts= en systemd-boot.
+
+#+begin_src sh
+uname -r
+#+end_src
+
+Confirmar que el nombre incluye =lts=. Después volver al kernel normal.
+
+** 4.7 Comprobar ZRAM y swap física
+#+begin_src sh
+swapon --show --output=NAME,TYPE,SIZE,USED,PRIO
+zramctl
+cat /proc/cmdline
+#+end_src
+
+La ZRAM debe existir. La swap física también debe aparecer.
+
+** 4.8 Ajustar el tamaño de ZRAM
+Revisar primero:
+
+#+begin_src sh
+cat /etc/systemd/zram-generator.conf
+#+end_src
+
+Dejar:
+
+#+begin_src conf
+[zram0]
+zram-size = min(ram / 2, 16384)
+compression-algorithm = zstd
+swap-priority = 100
+#+end_src
+
+Guardar en =/etc/systemd/zram-generator.conf=.
+
+La forma más simple de aplicar una modificación de tamaño es reiniciar. Antes de hacerlo, completar también la prioridad de la swap física.
+
+** 4.9 Dar prioridad 10 a la swap física
+Buscar la entrada swap en =/etc/fstab=. Debe quedar conceptualmente:
+
+#+begin_src conf
+UUID=UUID_DE_P4 none swap defaults,pri=10 0 0
+#+end_src
+
+No modificar el UUID; sólo añadir =pri=10= si no existe.
+
+Después de reiniciar:
+
+#+begin_src sh
+swapon --show --output=NAME,TYPE,SIZE,USED,PRIO
+#+end_src
+
+Resultado esperado:
+
+#+begin_src text
+/dev/zram0        ...   PRIO 100
+/dev/nvme0n1p4   ...   PRIO 10
+#+end_src
+
+** 4.10 Configurar y verificar hibernación
+Arch actual puede reanudar mediante la variable UEFI =HibernateLocation= cuando se usa el initramfs systemd. Para hacer la configuración explícita y reproducible, esta guía mantiene además un =resume= dirigido a la swap física si resulta necesario.
+
+Comprobar el initramfs:
+
+#+begin_src sh
+grep '^HOOKS=' /etc/mkinitcpio.conf
+#+end_src
+
+Si contiene el hook =systemd=, no se necesita añadir el hook =resume= para proporcionar el mecanismo básico de reanudación.
+
+Si utiliza =udev= y no =systemd=, añadir =resume= después de que el dispositivo swap pueda existir, por ejemplo:
+
+#+begin_src conf
+HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block filesystems resume fsck)
+#+end_src
+
+No sustituir la línea completa a ciegas: conservar los hooks actuales y añadir =resume= sólo cuando corresponda.
+
+Si se ha modificado =mkinitcpio.conf=:
+
+#+begin_src sh
+sudo mkinitcpio -P
+#+end_src
+
+Comprobar el UUID de la swap:
+
+#+begin_src sh
+lsblk -f /dev/nvme0n1p4
+blkid /dev/nvme0n1p4
+#+end_src
+
+Revisar las entradas creadas por systemd-boot:
+
+#+begin_src sh
+ls -l /boot/loader/entries/
+grep -R '^options' /boot/loader/entries/
+#+end_src
+
+Si se decide fijar explícitamente el destino, añadir =resume= a la línea =options= de las entradas de =linux= y =linux-lts=:
+
+#+begin_src text
+resume=UUID=UUID_DE_P4
+#+end_src
+
+No eliminar los parámetros que haya generado =archinstall=, especialmente =root=, =rootflags=subvol=@=, =rw= o =zswap.enabled=0=.
+
+Reiniciar si se modificaron parámetros del kernel.
+
+** 4.11 Probar hibernación
+Antes de instalar Xfce:
+
+#+begin_src sh
+sudo systemctl hibernate
+#+end_src
+
+El equipo debe apagarse completamente. Encenderlo de nuevo y dejar que arranque Arch. La sesión debe reanudarse.
+
+Comprobar el journal:
+
+#+begin_src sh
+journalctl -b | grep -Ei 'hibernate|hibernation|resume'
+#+end_src
+
+Si falla, detener aquí la instalación del escritorio y diagnosticar:
+
+→ swap persistente activa;
+→ tamaño suficiente;
+→ initramfs correcto;
+→ entrada de systemd-boot correcta si se usa =resume= explícito;
+→ firmware/ACPI del equipo.
+
+** 4.12 TRIM
+Comprobar soporte:
+
+#+begin_src sh
+lsblk -D
+#+end_src
+
+Activar/verificar TRIM periódico:
+
+#+begin_src sh
+sudo systemctl enable --now fstrim.timer
+systemctl status fstrim.timer
+#+end_src
+
+** 4.13 Instalar Snapper y snap-pac
+#+begin_src sh
+sudo pacman -S snapper snap-pac
+#+end_src
+
+El subvolumen =@snapshots= ya existe. Para permitir que Snapper cree su configuración sin sustituir nuestro diseño:
+
+#+begin_src sh
+sudo umount /.snapshots
+sudo rmdir /.snapshots
+sudo snapper -c root create-config /
+sudo btrfs subvolume delete /.snapshots
+sudo mkdir /.snapshots
+sudo mount /.snapshots
+sudo chmod 750 /.snapshots
+#+end_src
+
+Comprobar:
+
+#+begin_src sh
+findmnt /.snapshots
+sudo snapper -c root list
+#+end_src
+
+** 4.14 Política de snapshots
+Editar =/etc/snapper/configs/root= y dejar como objetivo:
+
+#+begin_src conf
+TIMELINE_CREATE="yes"
+TIMELINE_CLEANUP="yes"
+TIMELINE_LIMIT_HOURLY="10"
+TIMELINE_LIMIT_DAILY="7"
+TIMELINE_LIMIT_WEEKLY="4"
+TIMELINE_LIMIT_MONTHLY="6"
+TIMELINE_LIMIT_YEARLY="0"
+NUMBER_CLEANUP="yes"
+NUMBER_LIMIT="30"
+#+end_src
+
+Activar:
+
+#+begin_src sh
+sudo systemctl enable --now snapper-timeline.timer
+sudo systemctl enable --now snapper-cleanup.timer
+systemctl list-timers | grep snapper
+#+end_src
+
+** 4.15 Probar snap-pac
+Realizar una transacción real de =pacman= cuando exista una actualización o paquete pequeño necesario y comprobar después:
+
+#+begin_src sh
+sudo snapper list
+#+end_src
+
+Deben aparecer snapshots pre/post asociados a la transacción.
+
+** 4.16 Crear el primer hito
+#+begin_src sh
+sudo snapper create --description "Arch minimo verificado"
+#+end_src
+
+** 4.17 Criterio de salida de la fase
+- [ ] Arranca sin USB.
+- [ ] =linux= arranca.
+- [ ] =linux-lts= arranca.
+- [ ] NetworkManager conecta Wi-Fi.
+- [ ] Btrfs y XFS están montados correctamente.
+- [ ] ZRAM tiene prioridad 100.
+- [ ] La swap física tiene prioridad 10.
+- [ ] Hibernación y reanudación funcionan.
+- [ ] Snapper funciona.
+- [ ] =snap-pac= crea snapshots.
+- [ ] Existe el snapshot «Arch mínimo verificado».
+
+* 5. Fase 5 - En consola mínima: Xorg, Xfce y LightDM
+** 5.1 Objetivo
+Instalar la capa gráfica sin mezclar todavía personalización ni aplicaciones de usuario. Al final de esta fase debe existir un Xfce funcional y pequeño.
+
+** 5.2 Lo que NO se reinstala
+=archinstall= ya ha configurado, según las selecciones anteriores:
+
+→ NetworkManager;
+→ ZRAM;
+→ PipeWire/WirePlumber;
+→ kernels;
+→ microcódigo AMD;
+→ systemd-boot.
+
+No duplicar esos pasos.
+
+** 5.3 Gráficos AMD y Xorg
+Instalar:
+
+#+begin_src sh
+sudo pacman -S mesa vulkan-radeon xorg-server xorg-xrandr
+#+end_src
+
+Para una iGPU AMD moderna, el driver =amdgpu= forma parte del kernel y el modesetting genérico de Xorg suele ser suficiente. No instalar =xf86-video-amdgpu= salvo que un problema concreto lo justifique.
+
+** 5.4 Xfce base
+#+begin_src sh
+sudo pacman -S xfce4
+#+end_src
+
+No instalar el grupo completo =xfce4-goodies=. Se elegirán sólo los complementos necesarios.
+
+** 5.5 Integración de escritorio seleccionada
+#+begin_src sh
+sudo pacman -S \
+  xfce4-screensaver \
+  xfce4-whiskermenu-plugin \
+  gvfs \
+  gvfs-mtp \
+  thunar-archive-plugin \
+  file-roller \
+  network-manager-applet \
+  pavucontrol
+#+end_src
+
+** 5.6 LightDM
+#+begin_src sh
+sudo pacman -S lightdm lightdm-gtk-greeter lightdm-gtk-greeter-settings
+#+end_src
+
+LightDM es suficiente para Xfce, añade menos dependencias que GDM y no impide utilizar GNOME Keyring.
+
+** 5.7 GNOME Keyring
+#+begin_src sh
+sudo pacman -S gnome-keyring libsecret seahorse
+#+end_src
+
+No habilitar autologin. El desbloqueo del llavero =Login= debe quedar ligado al inicio de sesión mediante PAM.
+
+** 5.8 Comprobaciones antes de activar LightDM
+Comprobar la sesión Xfce:
+
+#+begin_src sh
+ls /usr/share/xsessions/
+#+end_src
+
+Comprobar servicios y audio:
+
+#+begin_src sh
+systemctl status NetworkManager.service
+systemctl --user status pipewire.service 2>/dev/null || true
+systemctl --failed
+#+end_src
+
+Comprobar GPU:
+
+#+begin_src sh
+lspci -k -d ::03xx
+#+end_src
+
+Debe aparecer =amdgpu= como kernel driver en uso para el hardware AMD correspondiente.
+
+** 5.9 Habilitar LightDM sólo al final
+#+begin_src sh
+sudo systemctl enable lightdm.service
+sudo reboot
+#+end_src
+
+* 6. Fase 6 - Primer arranque de Xfce
+** 6.1 Objetivo
+Validar el escritorio sin introducir todavía cambios estéticos que puedan confundir el diagnóstico.
+
+** 6.2 Inicio de sesión
+El flujo esperado es:
+
+#+begin_src text
+UEFI
+  -> systemd-boot
+      -> Arch Linux
+          -> LightDM
+              -> Xfce Session
+#+end_src
+
+** 6.3 Comprobaciones básicas
+- [ ] LightDM aparece correctamente.
+- [ ] La sesión seleccionada es Xfce.
+- [ ] Xfce inicia sin errores visibles.
+- [ ] Resolución y refresco son correctos.
+- [ ] Wi-Fi reconecta automáticamente.
+- [ ] NetworkManager Applet funciona.
+- [ ] Thunar abre.
+- [ ] Un dispositivo USB se monta mediante GVFS.
+- [ ] El audio funciona.
+- [ ] El micrófono aparece si se utiliza.
+- [ ] El bloqueo de pantalla funciona.
+- [ ] GNOME Keyring no solicita una contraseña adicional inesperada.
+
+** 6.4 Diagnóstico de audio y red
+#+begin_src sh
+nmcli device
+wpctl status
+pactl info
+#+end_src
+
+** 6.5 Suspensión e hibernación
+Probar primero suspensión desde Xfce y después hibernación:
+
+#+begin_src sh
+systemctl suspend
+#+end_src
+
+Tras reanudar, probar:
+
+#+begin_src sh
+systemctl hibernate
+#+end_src
+
+La hibernación ya se probó en TTY; repetirla ahora valida la interacción con la sesión gráfica.
+
+** 6.6 Snapshot del escritorio base
+#+begin_src sh
+sudo snapper create --description "Xfce base funcional"
+#+end_src
+
+No comenzar a instalar temas hasta tener este punto de retorno.
+
+* 7. Fase 7 - Configurar Xfce: apariencia y teclado
+** 7.1 Objetivo
+Convertir Xfce en un escritorio moderno, sobrio y centrado en teclado, evitando depender de componentes AUR para la apariencia fundamental.
+
+** 7.2 Tema GTK: Orchis
+Actualmente =orchis-theme= se mantiene en el repositorio oficial =extra= y es una alternativa moderna razonable a la estética de Arc/Arc-Darker.
+
+Instalar:
+
+#+begin_src sh
+sudo pacman -S orchis-theme
+#+end_src
+
+Criterio inicial:
+
+→ probar =Orchis-Dark= o la variante oscura disponible;
+→ conservar una variante clara si determinadas aplicaciones la necesitan;
+→ no convertir Arc en dependencia básica mientras su mantenimiento se realice fuera de repositorios oficiales.
+
+Alternativas oficiales que pueden probarse si Orchis no convence:
+
+→ =pop-gtk-theme=;
+→ =adw-gtk-theme=.
+
+** 7.3 Iconos
+Instalar Papirus desde repositorios oficiales:
+
+#+begin_src sh
+sudo pacman -S papirus-icon-theme
+#+end_src
+
+Probar =Papirus-Dark= con el tema oscuro.
+
+** 7.4 Fuentes base
+Antes de instalar Aporetic desde AUR, disponer de una base completa:
+
+#+begin_src sh
+sudo pacman -S noto-fonts noto-fonts-extra noto-fonts-emoji ttf-liberation
+#+end_src
+
+Ajuste inicial orientativo:
+
+→ interfaz: Noto Sans, 10-11 pt;
+→ monoespaciada provisional: Liberation Mono o DejaVu Sans Mono;
+→ Aporetic se instalará en la fase AUR y podrá convertirse en la fuente principal después.
+
+** 7.5 Panel
+Mantener un panel único y simple. Orden recomendado:
+
+→ Whisker Menu;
+→ separador;
+→ botones/lista de ventanas;
+→ espacios de trabajo si realmente se utilizan;
+→ área de notificación/status notifier;
+→ NetworkManager;
+→ volumen;
+→ reloj;
+→ acciones de sesión.
+
+Evitar widgets cuyo valor no compense el ruido visual.
+
+** 7.6 Escritorio
+→ fondo sencillo;
+→ iconos de escritorio desactivados o reducidos a lo imprescindible;
+→ no usar el escritorio como almacén permanente de ficheros;
+→ mantener el comportamiento de ventanas de Xfwm hasta tener definidos los atajos.
+
+** 7.7 Rofi
+#+begin_src sh
+sudo pacman -S rofi
+#+end_src
+
+Rofi se utilizará como lanzador principal mediante teclado.
+
+** 7.8 Atajos base
+Configuración objetivo:
+
+| Atajo | Acción |
+|-------+--------|
+| =Super+Space= | =rofi -show drun= |
+| =Super+Return= | terminal |
+| =Super+E= | =emacsclient -c -a emacs= cuando Emacs esté instalado |
+| =Super+F= | =thunar= |
+| =Super+L= | =xflock4= |
+| =Alt+Tab= | cambiar ventana |
+| =Super+1..4= | cambiar de espacio de trabajo |
+
+Para inspeccionar la configuración:
+
+#+begin_src sh
+xfconf-query -c xfce4-keyboard-shortcuts -lv
+#+end_src
+
+Una vez estabilizados los atajos, se podrán exportar o reconstruir mediante =xfconf-query= desde dotfiles.
+
+** 7.9 Compositor: mantener Xfwm inicialmente
+No instalar Picom de forma automática.
+
+Xfwm ya proporciona composición suficiente para:
+
+→ sombras;
+→ transparencia básica;
+→ composición ordinaria del escritorio;
+→ una pila gráfica sencilla.
+
+La prioridad de esta workstation es estabilidad y claridad. Por eso el estado inicial será:
+
+#+begin_src text
+Xfce
+  -> compositor de Xfwm ACTIVADO
+  -> Picom NO instalado
+#+end_src
+
+** 7.10 Cuándo merece la pena Picom
+Picom está mantenido actualmente en los repositorios oficiales, por lo que no hay inconveniente de mantenimiento. Sin embargo, sólo se añadirá si se quiere una característica concreta como blur o reglas de transparencia más avanzadas.
+
+Si se decide probarlo:
+
+#+begin_src sh
+sudo pacman -S picom
+#+end_src
+
+Antes de iniciarlo, desactivar el compositor de Xfwm. Nunca mantener dos compositores simultáneos.
+
+Criterio de decisión:
+
+→ si la mejora visual es pequeña, volver a Xfwm;
+→ si aparecen tearing, artefactos o complejidad innecesaria, volver a Xfwm;
+→ conservar Picom sólo si aporta una mejora visible y estable.
+
+** 7.11 Snapshot tras la personalización base
+#+begin_src sh
+sudo snapper create --description "Xfce apariencia y teclado"
+#+end_src
+
+* 8. Fase 8 - AUR y paru
+** 8.1 Objetivo
+Introducir AUR cuando el sistema base ya es estable, de forma que los problemas de compilación o empaquetado queden claramente separados de la instalación del sistema.
+
+** 8.2 Política AUR
+→ repositorios oficiales primero;
+→ AUR sólo cuando no exista una alternativa adecuada en repositorios;
+→ revisar el =PKGBUILD= antes de construir;
+→ no ejecutar =makepkg= como root;
+→ limitar helpers y repositorios de terceros;
+→ actualizar AUR conscientemente, no como una caja negra.
+
+** 8.3 Instalar paru
+Crear un directorio temporal de construcción, por ejemplo:
+
+#+begin_src sh
+mkdir -p ~/tmp/aur
+cd ~/tmp/aur
+git clone https://aur.archlinux.org/paru.git
+cd paru
+less PKGBUILD
+makepkg -si
+#+end_src
+
+Comprobar:
+
+#+begin_src sh
+paru --version
+#+end_src
+
+Después puede eliminarse el árbol de construcción si no se desea conservarlo.
+
+** 8.4 Instalar Aporetic
+La familia Aporetic se instalará desde AUR después de disponer de =paru=.
+
+#+begin_src sh
+paru -S ttf-aporetic
+#+end_src
+
+Después configurar la variante monoespaciada elegida para Emacs y terminal y la variante proporcional si se desea en la interfaz.
+
+No instalar simultáneamente varias copias de la misma fuente desde repositorios diferentes.
+
+* 9. Fase 9 - Aplicaciones
+** 9.1 Objetivo
+Instalar aplicaciones sólo después de que sistema, escritorio, snapshots y apariencia base estén aceptados.
+
+** 9.2 Núcleo del flujo de escritura y publicación
+#+begin_src sh
+sudo pacman -S emacs hugo firefox
+#+end_src
+
+Ésta es una de las razones centrales del cambio a Arch: Emacs y Hugo vuelven a formar parte de la administración normal mediante =pacman=.
+
+** 9.3 Terminal
+Alacritty es una opción adecuada para una terminal rápida y sencilla de configurar:
+
+#+begin_src sh
+sudo pacman -S alacritty
+#+end_src
+
+La configuración específica se realizará en TOML y se mantendrá en dotfiles. El objetivo posterior es:
+
+→ ventana aproximadamente al 90 % de la pantalla;
+→ centrada mediante reglas del gestor de ventanas;
+→ fuente Aporetic/monoespaciada elegida;
+→ transparencia moderada sólo si se conserva una solución de composición que la haga útil.
+
+No vincular la instalación de Alacritty a Picom: la terminal debe seguir siendo útil con el compositor estándar de Xfwm.
+
+** 9.4 Sincronización
+#+begin_src sh
+sudo pacman -S syncthing
+#+end_src
+
+No habilitar todavía el servicio de usuario. Primero se restaurará la estructura definitiva de directorios y se comprobarán las rutas que deben sincronizarse.
+
+** 9.5 Backup
+#+begin_src sh
+sudo pacman -S borg pika-backup
+#+end_src
+
+Los snapshots Btrfs protegen frente a determinados cambios locales; Borg/Pika debe seguir proporcionando copias separadas de los datos.
+
+** 9.6 Seguridad y cifrado selectivo
+#+begin_src sh
+sudo pacman -S keepassxc gocryptfs
+#+end_src
+
+** 9.7 Otras aplicaciones
+Instalar por grupos según necesidad, por ejemplo:
+
+#+begin_src sh
+sudo pacman -S darktable hledger
+#+end_src
+
+Los juegos, Steam, multilib y dependencias de Wine/Proton se incorporarán en una fase específica posterior si son necesarios. No forman parte del criterio de aceptación de la workstation base.
+
+* 10. Fase 10 - Restauración de configuración y datos
+** 10.1 Objetivo
+Restaurar el entorno personal sobre una estructura ya validada, evitando que servicios automáticos actúen antes de que las rutas definitivas estén en su sitio.
+
+** 10.2 Orden recomendado
+#+begin_src text
+/home limpio
+  -> estructura de directorios
+  -> dotfiles
+  -> configuración Xfce
+  -> Emacs
+  -> Notas
+  -> Blog
+  -> datos personales
+  -> comprobar
+  -> sólo entonces Syncthing
+  -> sólo entonces backups automáticos
+#+end_src
+
+** 10.3 Dotfiles
+Restaurar primero sólo configuraciones que se hayan revisado para Arch/Xfce.
+
+No copiar a ciegas configuraciones específicas de GNOME/Debian ni unidades systemd obsoletas.
+
+** 10.4 Emacs
+Restaurar la configuración de Emacs después de instalar Emacs desde repositorios oficiales.
+
+Comprobar antes de añadirlo a los atajos:
+
+#+begin_src sh
+emacs --version
+emacs --debug-init
+#+end_src
+
+Después utilizar, cuando exista un servidor o la configuración lo gestione:
+
+#+begin_src sh
+emacsclient -c -a emacs
+#+end_src
+
+** 10.5 Notas y Blog
+Restaurar los repositorios de notas y Blog después de comprobar propietarios y permisos.
+
+Antes de cualquier sincronización automática:
+
+#+begin_src sh
+find ~/Notas -maxdepth 2 -type d | head
+find ~/Blog -maxdepth 2 -type d | head
+#+end_src
+
+** 10.6 Syncthing
+Sólo después de validar rutas:
+
+#+begin_src sh
+systemctl --user enable --now syncthing.service
+#+end_src
+
+Comprobar la interfaz y cada carpeta compartida antes de aceptar cambios masivos.
+
+** 10.7 Cifrado selectivo con gocryptfs
+Crear un directorio cifrado y un punto de montaje separado:
+
+#+begin_src sh
+mkdir -p ~/.local/share/cifrado/privado.cipher
+mkdir -p ~/Cifrado
+gocryptfs -init ~/.local/share/cifrado/privado.cipher
+#+end_src
+
+Guardar la master key de recuperación fuera del equipo.
+
+Montar cuando sea necesario:
+
+#+begin_src sh
+gocryptfs ~/.local/share/cifrado/privado.cipher ~/Cifrado
+#+end_src
+
+Desmontar:
+
+#+begin_src sh
+fusermount3 -u ~/Cifrado
+#+end_src
+
+No configurar automontaje al arranque salvo que exista una necesidad concreta: el objetivo del cifrado selectivo es precisamente que no añada fricción al boot.
+
+* 11. Fase 11 - Validación final
+** 11.1 Objetivo
+Cerrar la instalación únicamente cuando el sistema completo sea comprensible, repetible y tenga rutas de recuperación verificadas.
+
+** 11.2 Estado del sistema
+#+begin_src sh
+systemctl --failed
+journalctl -p 3 -b
+#+end_src
+
+Investigar cualquier unidad fallida persistente antes de considerar terminada la instalación.
+
+** 11.3 Arranque
+#+begin_src sh
+bootctl status
+uname -r
+#+end_src
+
+- [ ] systemd-boot funciona.
+- [ ] kernel normal funciona.
+- [ ] kernel LTS funciona.
+
+** 11.4 Almacenamiento
+#+begin_src sh
+lsblk -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINTS
+findmnt /
+findmnt /home
+findmnt /.snapshots
+findmnt /var/log
+findmnt /var/cache/pacman/pkg
+sudo btrfs filesystem usage /
+#+end_src
+
+** 11.5 Memoria e hibernación
+#+begin_src sh
+swapon --show --output=NAME,TYPE,SIZE,USED,PRIO
+zramctl
+#+end_src
+
+- [ ] ZRAM prioridad 100.
+- [ ] swap física prioridad 10.
+- [ ] hibernación funciona desde Xfce.
+
+** 11.6 Snapshots
+#+begin_src sh
+sudo snapper list
+systemctl list-timers | grep snapper
+#+end_src
+
+- [ ] timeline activa.
+- [ ] cleanup activo.
+- [ ] snap-pac funciona.
+
+** 11.7 Red y audio
+#+begin_src sh
+nmcli device
+wpctl status
+#+end_src
+
+** 11.8 Snapshot final
+Cuando todo esté aceptado:
+
+#+begin_src sh
+sudo snapper create --description "Arch Xfce workstation verificada"
+#+end_src
+
+* 12. Fase 12 - Mantenimiento y recuperación
+** 12.1 Rutina de actualización
+Actualizar siempre el sistema completo:
+
+#+begin_src sh
+sudo pacman -Syu
+#+end_src
+
+Antes de actualizaciones que impliquen intervención manual, consultar las noticias oficiales de Arch.
+
+** 12.2 Caché de paquetes
+Con =pacman-contrib=:
+
+#+begin_src sh
+sudo systemctl enable --now paccache.timer
+paccache -d
+#+end_src
+
+=@pkg= queda fuera de los snapshots de =@=, evitando multiplicar dentro de cada snapshot los paquetes descargados.
+
+** 12.3 TRIM
+#+begin_src sh
+systemctl status fstrim.timer
+#+end_src
+
+** 12.4 Snapper
+Revisión periódica:
+
+#+begin_src sh
+sudo snapper list
+sudo btrfs filesystem usage /
+#+end_src
+
+No mantener snapshots indefinidamente «por si acaso». La política de limpieza debe evitar que un historial local termine ocupando espacio sin control.
+
+** 12.5 AUR
+Actualizar primero repositorios oficiales y después revisar paquetes AUR:
+
+#+begin_src sh
+sudo pacman -Syu
+paru -Sua
+#+end_src
+
+No automatizar la aceptación de cambios de PKGBUILD.
+
+** 12.6 Noticias de Arch
+Antes o durante la rutina de actualización, comprobar especialmente las noticias que exijan intervención manual:
+
+https://archlinux.org/news/
+
+** 12.7 Logs y salud del sistema
+#+begin_src sh
+systemctl --failed
+journalctl -p 3 -b
+sudo smartctl -a /dev/nvme0n1
+sudo nvme smart-log /dev/nvme0n1
+#+end_src
+
+No es necesario ejecutar ambos diagnósticos de almacenamiento constantemente; son herramientas disponibles cuando existe una sospecha o durante una revisión periódica.
+
+** 12.8 Snapshots no son backup
+La protección se reparte así:
+
+#+begin_src text
+Snapper
+  -> recuperar cambios del sistema
+
+/home XFS
+  -> datos separados del rollback
+
+Borg / Pika
+  -> copias de seguridad reales
+
+Syncthing
+  -> sincronización, NO backup
+
+gocryptfs
+  -> confidencialidad selectiva
+#+end_src
+
+** 12.9 Recuperación desde ISO si Arch no arranca
+Arrancar la ISO, cargar teclado y conectar Wi-Fi si hace falta:
+
+#+begin_src sh
+loadkeys es
+iwctl
+#+end_src
+
+Montar el nivel superior Btrfs:
+
+#+begin_src sh
+mount -o subvolid=5 /dev/nvme0n1p2 /mnt
+sudo btrfs subvolume list /mnt
+#+end_src
+
+Los snapshots de Snapper se encontrarán bajo la estructura de =@snapshots=.
+
+Antes de modificar nada, identificar con precisión el snapshot que se desea recuperar y conservar el =@= actual con otro nombre.
+
+Ejemplo conceptual:
+
+#+begin_src sh
+mv /mnt/@ /mnt/@-roto
+btrfs subvolume snapshot /mnt/@snapshots/NUMERO/snapshot /mnt/@
+#+end_src
+
+Después volver a montar el sistema restaurado:
+
+#+begin_src sh
+umount /mnt
+mount -o subvol=@ /dev/nvme0n1p2 /mnt
+mkdir -p /mnt/boot /mnt/home /mnt/.snapshots /mnt/var/log /mnt/var/cache/pacman/pkg
+mount -o subvol=@snapshots /dev/nvme0n1p2 /mnt/.snapshots
+mount -o subvol=@log /dev/nvme0n1p2 /mnt/var/log
+mount -o subvol=@pkg /dev/nvme0n1p2 /mnt/var/cache/pacman/pkg
+mount /dev/nvme0n1p3 /mnt/home
+mount /dev/nvme0n1p1 /mnt/boot
+#+end_src
+
+Entrar:
+
+#+begin_src sh
+arch-chroot /mnt
+#+end_src
+
+** 12.10 Precaución con /boot al restaurar
+=/boot= es FAT32 y no forma parte de los snapshots Btrfs. Tras restaurar un =@= antiguo puede existir una diferencia entre:
+
+→ módulos de kernel presentes en =/usr/lib/modules= dentro del snapshot;
+→ kernels/initramfs presentes actualmente en =/boot=.
+
+Comprobar:
+
+#+begin_src sh
+pacman -Q linux linux-lts
+ls /usr/lib/modules
+ls -lh /boot
+#+end_src
+
+Si hay incoherencia, no reiniciar todavía. Hay dos estrategias seguras:
+
+→ reinstalar desde =@pkg= las versiones de kernel coherentes con el snapshot, si siguen disponibles;
+→ o llevar el sistema restaurado al estado actual mediante una actualización completa =pacman -Syu= y regenerar initramfs.
+
+Después:
+
+#+begin_src sh
+mkinitcpio -P
+bootctl update
+#+end_src
+
+Salir y reiniciar sólo cuando kernel, módulos e initramfs sean coherentes.
+
+Conservar =@-roto= hasta verificar que el sistema recuperado funciona.
+
+* 13. Checklist maestro de la instalación
+** 13.1 Antes de archinstall
+- [ ] UEFI confirmado.
+- [ ] Wi-Fi mediante iwctl.
+- [ ] NVMe identificado inequívocamente.
+- [ ] Copia de seguridad previa verificada.
+- [ ] Particionado terminado por Ruta A (GParted) o Ruta B (cfdisk).
+- [ ] p1 2 GiB FAT32 / ESP.
+- [ ] p2 512 GiB Btrfs.
+- [ ] @ -> /mnt.
+- [ ] @snapshots -> /mnt/.snapshots.
+- [ ] @log -> /mnt/var/log.
+- [ ] @pkg -> /mnt/var/cache/pacman/pkg.
+- [ ] No existe @home.
+- [ ] p3 XFS -> /mnt/home.
+- [ ] p4 swap ~40 GiB al final y activa.
+- [ ] /mnt/boot corresponde a p1.
+- [ ] findmnt y swapon verificados.
+
+** 13.2 En archinstall
+- [ ] Disk configuration -> Pre-mounted configuration (/mnt).
+- [ ] archinstall no va a particionar ni formatear.
+- [ ] Profile Minimal.
+- [ ] systemd-boot.
+- [ ] linux + linux-lts.
+- [ ] NetworkManager.
+- [ ] PipeWire.
+- [ ] ZRAM activada.
+- [ ] usuario con sudo.
+- [ ] paquetes adicionales revisados.
+
+** 13.3 Arch mínimo
+- [ ] Arranca sin USB.
+- [ ] linux funciona.
+- [ ] linux-lts funciona.
+- [ ] Wi-Fi NetworkManager funciona.
+- [ ] /home es XFS.
+- [ ] subvolúmenes correctos.
+- [ ] ZRAM 16 GiB máx. / pri 100.
+- [ ] swap física pri 10.
+- [ ] hibernación funciona.
+- [ ] fstrim.timer activo.
+- [ ] Snapper funciona.
+- [ ] snap-pac funciona.
+- [ ] snapshot «Arch mínimo verificado».
+
+** 13.4 Xfce base
+- [ ] Mesa/Vulkan AMD.
+- [ ] Xorg.
+- [ ] Xfce.
+- [ ] LightDM.
+- [ ] GNOME Keyring.
+- [ ] NetworkManager Applet.
+- [ ] Thunar/GVFS/USB.
+- [ ] PipeWire comprobado.
+- [ ] suspensión comprobada.
+- [ ] hibernación comprobada desde Xfce.
+- [ ] snapshot «Xfce base funcional».
+
+** 13.5 Personalización
+- [ ] Orchis probado.
+- [ ] Papirus configurado.
+- [ ] fuentes base configuradas.
+- [ ] panel simplificado.
+- [ ] Rofi.
+- [ ] atajos de teclado.
+- [ ] compositor Xfwm mantenido salvo razón para Picom.
+- [ ] snapshot de apariencia/teclado.
+
+** 13.6 Aplicaciones y restauración
+- [ ] paru instalado y política AUR definida.
+- [ ] Aporetic instalada.
+- [ ] Emacs.
+- [ ] Hugo.
+- [ ] navegador.
+- [ ] terminal.
+- [ ] Borg/Pika.
+- [ ] gocryptfs.
+- [ ] dotfiles restaurados.
+- [ ] notas restauradas.
+- [ ] Blog restaurado.
+- [ ] Syncthing activado sólo después de revisar rutas.
+
+** 13.7 Cierre
+- [ ] =systemctl --failed= limpio o explicado.
+- [ ] =journalctl -p 3 -b= revisado.
+- [ ] backup real configurado.
+- [ ] hibernación final comprobada.
+- [ ] snapshot «Arch Xfce workstation verificada».
+
+* 14. Comandos de referencia rápida
+| Necesidad | Comando |
+|-----------+---------|
+| Wi-Fi en ISO | =iwctl= |
+| Wi-Fi en sistema | =nmtui= o =nmcli --ask ...= |
+| Actualizar | =sudo pacman -Syu= |
+| Discos | =lsblk -f= |
+| Montajes | =findmnt= |
+| Swap | =swapon --show= |
+| ZRAM | =zramctl= |
+| Snapshots | =sudo snapper list= |
+| Snapshot manual | =sudo snapper create --description "texto"= |
+| Kernel | =uname -r= |
+| Arranque | =bootctl status= |
+| Hibernar | =systemctl hibernate= |
+| Fallos systemd | =systemctl --failed= |
+| Errores del boot | =journalctl -p 3 -b= |
+| Uso Btrfs | =sudo btrfs filesystem usage /= |
+| Red | =nmcli device= |
+| Audio | =wpctl status= |
+| GPU | =lspci -k -d ::03xx= |
+| Atajos Xfce | =xfconf-query -c xfce4-keyboard-shortcuts -lv= |
+| SMART NVMe | =sudo nvme smart-log /dev/nvme0n1= |
+
+* 15. Fuentes y vigencia
+Documento revisado el 1 de septiembre de 2026. Arch es rolling release: antes de ejecutar esta guía mucho tiempo después de esa fecha conviene comprobar las páginas oficiales, especialmente =archinstall=, =mkinitcpio= y hibernación.
+
+Fuentes principales:
+
+→ ArchWiki - Installation guide: https://wiki.archlinux.org/title/Installation_guide
+→ ArchWiki - Archinstall: https://wiki.archlinux.org/title/Archinstall
+→ ArchWiki - systemd-boot: https://wiki.archlinux.org/title/Systemd-boot
+→ ArchWiki - Snapper: https://wiki.archlinux.org/title/Snapper
+→ ArchWiki - Btrfs: https://wiki.archlinux.org/title/Btrfs
+→ ArchWiki - Xfce: https://wiki.archlinux.org/title/Xfce
+→ ArchWiki - NetworkManager: https://wiki.archlinux.org/title/NetworkManager
+→ ArchWiki - PipeWire: https://wiki.archlinux.org/title/PipeWire
+→ ArchWiki - ZRAM: https://wiki.archlinux.org/title/ZRAM
+→ ArchWiki - Suspend and hibernate: https://wiki.archlinux.org/title/Power_management/Suspend_and_hibernate
+→ ArchWiki - mkinitcpio: https://wiki.archlinux.org/title/Mkinitcpio
+→ ArchWiki - AMDGPU: https://wiki.archlinux.org/title/AMDGPU
+→ ArchWiki - GNOME Keyring: https://wiki.archlinux.org/title/GNOME/Keyring
+→ ArchWiki - gocryptfs: https://wiki.archlinux.org/title/Gocryptfs
+→ Código de archinstall - particionado manual: https://github.com/archlinux/archinstall/blob/master/archinstall/lib/disk/partitioning_menu.py
+→ Código de archinstall - instalación guiada: https://github.com/archlinux/archinstall/blob/master/archinstall/scripts/guided.py
+→ Código de archinstall - instalador/base de paquetes: https://github.com/archlinux/archinstall/blob/master/archinstall/lib/installer.py
+→ Código de archinstall - PipeWire: https://github.com/archlinux/archinstall/blob/master/archinstall/applications/audio.py
+→ Paquete Orchis: https://archlinux.org/packages/extra/any/orchis-theme/
+→ Paquete Picom: https://archlinux.org/packages/extra/x86_64/picom/
+→ Manual zram-generator: https://man.archlinux.org/man/extra/zram-generator/zram-generator.conf.5.en

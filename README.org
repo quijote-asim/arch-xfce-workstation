@@ -1,0 +1,26 @@
+#+title: Arch Xfce Workstation
+
+* Objetivo
+
+Documentar un procedimiento reproducible para instalar y configurar una
+workstation Arch Linux con Xfce.
+
+Arquitectura principal:
+
+→ UEFI + systemd-boot.
+→ Btrfs para la raíz.
+→ Snapper para snapshots.
+→ /home independiente en XFS.
+→ ZRAM para swap ordinaria.
+→ Swap física para hibernación.
+→ Xfce + LightDM.
+→ Configuración orientada al teclado.
+
+* Instalación
+
+→ [[file:docs/guia-instalacion-arch-xfce.org][Guía completa en Org-mode]]
+→ [[file:docs/guia-instalacion-arch-xfce.pdf][Guía completa en PDF]]
+
+* Estado
+
+Proyecto activo durante la migración e instalación de Arch Linux.

@@ -1,0 +1,257 @@
+#+title: Índice comentado de chats sobre Arch Linux y Xfce
+#+date: [2026-09-01 mar 18:00]
+#+filetags: :arch:chatgpt:indice:xfce:
+#+identifier: 20260901T180000
+#+signature: referencia
+
+* Propósito
+
+Esta nota funciona como índice de las conversaciones dedicadas directamente a Arch Linux, Xfce, la migración desde Debian y la construcción de la nueva workstation. Cada entrada identifica el chat y enumera las cuestiones que estudia o responde.
+
+Tipo de nota: referencia e índice temático.
+
+* Estado de los enlaces
+
+El historial disponible permite recuperar títulos, fechas y contenidos, pero no las URL privadas exactas de las conversaciones. Por ello no se han inventado enlaces.
+
+→ Cada propiedad =ENLACE= queda marcada como =PENDIENTE=.
+→ Para completarla, abrir el chat correspondiente, copiar la URL del navegador y sustituir =PENDIENTE= por un enlace Org del tipo =[[URL][Abrir chat]]=.
+→ Los títulos marcados como reconstruidos describen fielmente la conversación, pero el título exacto no pudo recuperarse.
+
+* Chats sobre Arch Linux y Xfce
+
+** 2025-06-01 — Personalizar Arch XFCE4
+:PROPERTIES:
+:FECHA:    2025-06-01
+:ENLACE:   PENDIENTE
+:END:
+
+1. Cómo configurar Xfce con una apariencia moderna mediante WhiteSur, transparencias y paneles.
+2. Qué configuración básica utilizar para Picom estándar y en qué orden iniciarlo.
+3. Cómo configurar Alacritty en TOML para abrirse centrado, ocupar aproximadamente el 90 % de la pantalla y utilizar transparencia con desenfoque.
+4. Cómo definir Fira Mono Nerd Font Propo Medium como fuente de terminal.
+5. Cómo mostrar una imagen informativa en el escritorio al estilo de ciertas extensiones de fondo de GNOME/Fedora.
+6. Qué papel podría desempeñar Conky en esa solución.
+
+** 2025-08-21 — Linux LTS como kernel predeterminado en systemd-boot
+:PROPERTIES:
+:FECHA:    2025-08-21
+:TITULO:   RECONSTRUIDO
+:ENLACE:   PENDIENTE
+:END:
+
+1. Cómo convertir =linux-lts= en el kernel predeterminado de systemd-boot.
+2. Cómo ordenar las entradas del menú de arranque.
+3. Cómo comprobar qué kernel está realmente activo.
+4. Cómo eliminar el kernel =linux= sin perder una ruta operativa de arranque.
+5. Qué comprobaciones realizar antes y después de modificar las entradas.
+
+** 2026-01-16 — Arch Linux y reparación de systemd-boot
+:PROPERTIES:
+:FECHA:    2026-01-16
+:TITULO:   RECONSTRUIDO
+:ENLACE:   PENDIENTE
+:END:
+
+1. Cómo plantear un particionado GPT para UEFI con ESP FAT32, raíz Btrfs y swap opcional.
+2. Cómo instalar y reparar systemd-boot.
+3. Cómo construir y revisar las entradas de arranque de Arch.
+4. Cómo diagnosticar problemas entre firmware UEFI, NVRAM y la partición ESP.
+5. Cómo analizar el caso de una ESP en =p6= y una raíz Btrfs en =p7= con errores de montaje.
+6. Cómo utilizar la ruta EFI de fallback cuando la entrada registrada en NVRAM no funciona.
+
+** 2026-02-10 — Arch Btrfs Guía
+:PROPERTIES:
+:FECHA:    2026-02-10
+:ENLACE:   PENDIENTE
+:END:
+
+1. Cómo instalar Arch en arranque dual con Windows.
+2. Cómo evitar modificar la ESP de Windows creando o utilizando una ESP separada.
+3. Cómo organizar Btrfs con un subvolumen específico para la caché de paquetes.
+4. Cómo mantener =/home= en XFS fuera de los snapshots de la raíz.
+5. Cómo diagnosticar que GRUB no muestre la entrada de Windows.
+6. Cómo consultar los kernels instalados.
+7. Cómo buscar y eliminar completamente paquetes con Pacman.
+8. Cómo instalar el kernel más reciente conservando =linux-lts=.
+
+** 2026-08-30 — ¿Conviene sustituir Debian 13/GNOME por Arch Linux?
+:PROPERTIES:
+:FECHA:    2026-08-30
+:TITULO:   RECONSTRUIDO
+:ENLACE:   PENDIENTE
+:END:
+
+1. Si Arch Linux encaja mejor que Debian 13 con la forma real de trabajar del usuario.
+2. Qué información personal y técnica resulta necesaria para decidir la migración.
+3. Qué datos podían responderse usando el contexto ya conocido y cuáles faltaban.
+4. Cómo comparar estabilidad por congelación de versiones con actualidad de paquetes.
+5. Qué mantenimiento adicional exige Arch.
+6. Cómo afecta el cambio al flujo centrado en Emacs, terminal, Hugo y publicación en texto plano.
+7. Qué ventajas e inconvenientes tiene abandonar GNOME por un escritorio más modular.
+
+** 2026-08-31 — Copia para traspaso
+:PROPERTIES:
+:FECHA:    2026-08-31
+:ENLACE:   PENDIENTE
+:END:
+
+1. Cómo preparar copias verificables antes de sustituir Debian por Arch.
+2. Qué exclusiones utilizar para evitar cachés, Steam, papelera y datos regenerables.
+3. Cómo construir y comprobar una copia con =rsync -aHAX --numeric-ids=.
+4. Cómo validar primero el comando con =--dry-run= y estadísticas.
+5. Si era seguro navegar con Firefox mientras se realizaba la copia.
+6. Si podía ejecutarse simultáneamente una copia de Pika en otro disco ext4.
+7. Cómo comprobar un archivo =tar= y mostrar progreso mediante =pv=.
+8. Por qué la restauración del =tar= podía resultar demasiado lenta para ser la vía principal.
+9. Cuánto tiempo podía requerir la instalación de Arch.
+10. Si systemd-boot era una elección razonable frente a GRUB.
+
+** 2026-08-31 — Instalar Arch con Btrfs
+:PROPERTIES:
+:FECHA:    2026-08-31
+:ENLACE:   PENDIENTE
+:END:
+
+1. Cómo sustituir el particionado existente por una instalación limpia de Arch.
+2. Cómo situar una partición swap de aproximadamente 40 GiB al final del disco para hibernar.
+3. Cómo combinar ZRAM para el uso ordinario con swap física para hibernación.
+4. Cómo utilizar Btrfs para la raíz y XFS para =/home=.
+5. Si merecía la pena cifrar todo el sistema o era preferible un cifrado selectivo sin fricción durante el arranque.
+6. Cómo dividir la instalación en sistema mínimo, arranque, Xfce, apariencia y aplicaciones.
+7. Cómo conectarse inicialmente a la Wi-Fi desde la ISO.
+8. Cómo instalar systemd-boot y conservar los kernels =linux= y =linux-lts=.
+9. Cómo configurar Snapper y =snap-pac=.
+10. Cómo verificar consola, red, swap, ZRAM e hibernación antes de instalar el escritorio.
+11. Cómo convertir el proceso en una guía PDF detallada y revisarla técnicamente.
+
+** 2026-08-31 — Xfce con teclado y Arch
+:PROPERTIES:
+:FECHA:    2026-08-31
+:ENLACE:   PENDIENTE
+:END:
+
+1. Si Xfce se adapta realmente a un flujo de trabajo centrado en el teclado.
+2. Si Xfce resulta adecuado para una workstation Arch moderna con adaptaciones visuales.
+3. Qué gestor de sesión y almacén de claves utilizar.
+4. Si GDM era intrínsecamente más seguro y qué alternativas existían.
+5. Qué tema claro o mixto utilizar, con especial atención a Arc-Darker.
+6. Qué tema de iconos combina mejor con la apariencia elegida.
+7. Cómo utilizar las fuentes Aporetic de Protesilaos en la interfaz, Emacs y aplicaciones monoespaciadas.
+8. Qué paquetes instalar desde los repositorios oficiales y cuáles procedían del AUR.
+9. Qué diferencias existen entre Paru y Yay y cuál conviene adoptar.
+10. Cómo instalar y mantener el helper recomendado.
+11. Cómo mostrar una imagen en el escritorio Xfce mediante Conky u otra solución semejante.
+12. Cómo recoger la apariencia y la gestión del AUR en notas Org separadas.
+
+** 2026-08-31 — COSMIC y teclado en Arch
+:PROPERTIES:
+:FECHA:    2026-08-31
+:ENLACE:   PENDIENTE
+:END:
+
+1. Si el escritorio COSMIC se adapta al uso intensivo del teclado.
+2. Si su sistema de mosaico y espacios de trabajo mejora el flujo respecto a un escritorio tradicional.
+3. Si COSMIC está suficientemente maduro para utilizarse sobre un Arch moderno.
+4. Qué ventajas e inconvenientes presenta frente a Xfce.
+5. Cómo recoger el informe en una nota Org de referencia.
+
+** 2026-09-01 — Analiza Arch en Windows
+:PROPERTIES:
+:FECHA:    2026-09-01
+:ENLACE:   PENDIENTE
+:END:
+
+1. Qué aportaría utilizar Windows como sistema anfitrión y Arch dentro de su entorno Linux integrado.
+2. Qué diferencias prácticas existen entre un Arch virtualizado o integrado y una instalación nativa.
+3. Cómo afectaría esa solución al acceso al hardware, al escritorio gráfico y al flujo de trabajo cotidiano.
+4. Si simplificaría o complicaría el mantenimiento respecto a una workstation Arch/Xfce nativa.
+
+** 2026-09-01 — Sustituir Debian por Arch
+:PROPERTIES:
+:FECHA:    2026-09-01
+:ENLACE:   PENDIENTE
+:END:
+
+1. Cómo sustituir referencias visuales a Debian por referencias a Arch en una imagen existente.
+2. Qué elementos gráficos debían conservarse durante la edición.
+3. Cómo reflejar visualmente el cambio del sistema principal.
+
+** 2026-09-01 — Reordenar estructura Arch Xfce
+:PROPERTIES:
+:FECHA:    2026-09-01
+:ENLACE:   PENDIENTE
+:END:
+
+1. Cómo adaptar la estructura de directorios personales al nuevo sistema principal Arch/Xfce.
+2. Por qué no era necesario crear una jerarquía artificial =Repos/Externos=.
+3. Dónde ubicar los repositorios externos y los desarrollos propios.
+4. Por qué el Escritorio debía representar proyectos activos y no confundirse con todo =$HOME=.
+5. Qué carpeta temporal o de datos utilizar para materiales que no pertenecen al Escritorio.
+6. Cómo distinguir proyectos activos de proyectos terminados guardados en Archivo.
+7. Cuándo comprimir proyectos concluidos.
+8. Qué función cumple cada directorio de primer nivel.
+9. Cómo representar la estructura mediante un organigrama ASCII.
+10. Qué contenido establecer en =~/.config/user-dirs.dirs=.
+
+** 2026-09-01 — Comprobar ISO de Arch
+:PROPERTIES:
+:FECHA:    2026-09-01
+:ENLACE:   PENDIENTE
+:END:
+
+1. Cómo comprobar una ISO oficial de Arch antes de utilizarla.
+2. Cómo verificar la suma de comprobación del archivo descargado.
+3. Cómo verificar la firma separada mediante GnuPG.
+4. Cómo utilizar =--keyserver-options auto-key-retrieve= para obtener la clave del firmante.
+5. Cómo interpretar la firma de la ISO =archlinux-2026.08.01-x86_64.iso= realizada por Pierre Schmitz.
+6. Qué diferencia existe entre una firma criptográficamente correcta y una clave plenamente confiable dentro de la red de confianza de GnuPG.
+7. Cómo documentar el procedimiento como nota Org reutilizable.
+
+** 2026-09-01 — Arch Linux/Xfce workstation resiliente
+:PROPERTIES:
+:FECHA:    2026-09-01
+:TITULO:   RECUPERADO_DEL_HISTORIAL
+:ENLACE:   PENDIENTE
+:END:
+
+1. Cómo construir una workstation Arch/Xfce eficiente, actual y recuperable usando documentación oficial.
+2. Por qué utilizar UEFI y systemd-boot.
+3. Cómo coordinar Btrfs, XFS, Snapper, =snap-pac=, ZRAM y swap de hibernación.
+4. Por qué conservar dos kernels y una ruta de recuperación desde la ISO.
+5. Qué cambia al dejar de imponer GDM y escoger LightDM con greeter GTK.
+6. Cómo mantener GNOME Keyring mediante PAM sin instalar GNOME Shell.
+7. Qué razones justifican el cambio de arquitectura y qué límites deben declararse.
+8. Qué buenas prácticas son obligatorias para mantener Arch.
+9. Cómo organizar rutinas previas y posteriores a las actualizaciones.
+10. Qué tareas realizar semanal, mensual y trimestralmente.
+11. Cómo diagnosticar una actualización problemática y escalar hasta Snapper, =arch-chroot= o las copias externas.
+12. Cómo ampliar y regenerar la guía PDF sin olvidar la conexión Wi-Fi inicial.
+
+** 2026-09-01 — Ajuste alias actualización
+:PROPERTIES:
+:FECHA:    2026-09-01
+:ENLACE:   PENDIENTE
+:END:
+
+1. Cómo reorganizar los ficheros de configuración dedicados a actualización e instalación de paquetes.
+2. Por qué sustituir el criterio =install-my= por una función claramente denominada para instalar paquetes.
+3. Cómo eliminar un alias que ya no encajaba con el flujo acordado.
+4. Cómo renombrar =cp-bak= para expresar que su función real es respaldar un fichero.
+5. Cómo guardar respaldos de ficheros externos a =$HOME= bajo =~/.config/respaldo/sistema/=.
+6. Cómo guardar respaldos de ficheros del usuario bajo =~/.config/respaldo/usuario/=.
+7. Cómo reproducir dentro del respaldo la ruta relativa del fichero original.
+8. Cómo anteponer una fecha y hora de estilo Denote y añadir =--= y la extensión =.bak=.
+9. Cómo documentar la instalación de paquetes de forma organizada para poder modificarla en el futuro.
+
+* Chats excluidos deliberadamente
+
+→ Conversaciones sobre Debian, Hugo, Steam o compilación de Emacs que no estudian Arch ni Xfce como asunto central.
+→ Conversaciones sobre tmux, MAPA o copias generales cuando Arch sólo aparece como contexto secundario.
+→ Análisis de artículos o imágenes donde Arch se menciona incidentalmente, salvo el chat específico de sustitución visual incluido arriba.
+
+* Acción pendiente
+
+- [ ] Abrir cada conversación y completar su propiedad =ENLACE= con la URL directa.
+- [ ] Confirmar los títulos marcados como =RECONSTRUIDO=.
+- [ ] Revisar este índice cuando se cierre la instalación y marcar qué chats han quedado absorbidos por la guía canónica.
